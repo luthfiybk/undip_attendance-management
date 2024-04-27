@@ -1,3 +1,17 @@
+type Attendance = record { id : nat64; time : nat64; employee_id : nat64 };
+type Employee = record { name : text; role : text; employee_id : nat64 };
+type Error = variant {
+  NotFound : record { msg : text };
+  AlreadyExists : record { msg : text };
+};
+type Result = variant { Ok : Employee; Err : Error };
+type Result_1 = variant { Ok : Attendance; Err : Error };
 service : {
-    "greet": (text) -> (text) query;
+  add_employee : (nat64, text, text) -> (Result);
+  get_attendance : (nat64) -> (Result_1) query;
+  get_employee : (nat64) -> (Result) query;
+  list_attendance : () -> (vec Attendance) query;
+  list_employee : () -> (vec Employee) query;
+  submit_attendance : (nat64) -> (Result_1);
+  update_employee : (nat64, text, text) -> (Result);
 }

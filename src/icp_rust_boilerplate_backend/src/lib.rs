@@ -1,6 +1,6 @@
 #[macro_use]
 extern crate serde;
-use candid::{Decode, Encode, Result};
+use candid::{Decode, Encode};
 use ic_cdk::api::time;
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{BoundedStorable, Cell, DefaultMemoryImpl, StableBTreeMap, Storable};
@@ -17,27 +17,8 @@ struct Attendance {
     time: u64,
 }
 
-// Define the structure for employee
-#[derive(candid::CandidType, Clone, Serialize, Deserialize)]
-struct Employee {
-    employee_id: u64,
-    name: String,
-    role: String,
-}
-
 // Implement serialization and deserialization for attendance
 impl Storable for Attendance {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-// Implement serialization and deserialization for employee
-impl Storable for Employee {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
@@ -53,17 +34,29 @@ impl BoundedStorable for Attendance {
     const IS_FIXED_SIZE: bool = false;
 }
 
+// Define the structure for employee
+#[derive(candid::CandidType, Clone, Serialize, Deserialize)]
+struct Employee {
+    employee_id: u64,
+    name: String,
+    role: String,
+}
+
+// Implement serialization and deserialization for employee
+impl Storable for Employee {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(Encode!(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Decode!(bytes.as_ref(), Self).unwrap()
+    }
+}
+
 // Implement bounded storable for employee
 impl BoundedStorable for Employee {
     const MAX_SIZE: u32 = 1024;
     const IS_FIXED_SIZE: bool = false;
-}
-
-// Define the possible errors
-#[derive(candid::CandidType, Serialize, Deserialize)]
-enum Error {
-    NotFound { msg: String },
-    AlreadyExists { msg: String },
 }
 
 // Thread-local storage for memory manager, ID Counter, attendance storage, and employee storage
@@ -85,6 +78,13 @@ thread_local! {
         ));
 }
 
+// Define the possible errors
+#[derive(candid::CandidType, Serialize, Deserialize)]
+enum Error {
+    NotFound { msg: String },
+    AlreadyExists { msg: String },
+}
+
 #[ic_cdk::query]
 // Function to get attendance by ID
 fn get_attendance(req_id: u64) -> Result<Attendance, Error> {
@@ -101,10 +101,9 @@ fn get_attendance(req_id: u64) -> Result<Attendance, Error> {
 fn submit_attendance(employee_id: u64) -> Result<Attendance, Error> {
     let id = ID_COUNTER
         .with(|counter| {
-            let current_value = counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1);
-    })
-    .expect("Cannot increment counter");
+            let current_value = *counter.borrow().get();
+            counter.borrow_mut().set(current_value + 1)
+        }).expect("Cannot increment ID");
 
     let attendance = Attendance {
         id,
@@ -115,6 +114,17 @@ fn submit_attendance(employee_id: u64) -> Result<Attendance, Error> {
     ATTENDANCE_STORAGE.with(|service| service.borrow_mut().insert(id, attendance.clone()));
 
     Ok(attendance)
+}
+
+#[ic_cdk::query]
+fn list_attendance() -> Vec<Attendance> {
+    ATTENDANCE_STORAGE.with(|service| {
+        service
+            .borrow()
+            .iter()
+            .map(|(_, v)| v.clone())
+            .collect()
+    })
 }
 
 fn _get_attendance(req_id: &u64) -> Option<Attendance> {
@@ -147,18 +157,30 @@ fn add_employee(employee_id: u64, name: String, role: String) -> Result<Employee
 
 #[ic_cdk::update]
 fn update_employee(employee_id: u64, name: String, role: String) -> Result<Employee, Error> {
-    EMPLOYEE_STORAGE.with(|service| service.borrow().get(&employee_id)) {
+    match _get_employee(&employee_id){
         Some(mut employee) => {
             employee.name = name;
             employee.role = role;
-            service.borrow_mut().insert(employee_id, employee.clone());
-            Ok(employee);
+            EMPLOYEE_STORAGE.with(|service| service.borrow_mut().insert(employee_id, employee.clone()));
+            Ok(employee)
         },
-        None => Err(Error::NotFound {
-            msg: format!("Employee with ID {} not found", employee_id),
-        }),
+        None => {
+            return Err(Error::NotFound {
+                msg: format!("Employee with ID {} not found", employee_id),
+            });
+        }    
     }
-    
+}
+
+#[ic_cdk::query]
+fn list_employee() -> Vec<Employee> {
+    EMPLOYEE_STORAGE.with(|service| {
+        service
+            .borrow()
+            .iter()
+            .map(|(_, v)| v.clone())
+            .collect()
+    })
 }
 
 fn _get_employee(req_id: &u64) -> Option<Employee> {
